@@ -2,8 +2,6 @@ import os
 from flask import Flask, request, jsonify
 
 # The fixed JSON response requested by the user.
-# In a real-world application, this would be dynamically generated
-# based on the input string (e.g., using a separate LLM API call).
 FIXED_RESPONSE_DATA = {
     "ai_summary": "Customer Sales Summary: Punjab Patil PATIL**1. Customer Persona Snapshot:**- Full Name: Punjab Patil PATIL- Gender: M- Location: Nanded, Maharashtra- Work Style: Self-employed / Business owner- Opportunity Stage: Enquiry- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Purchase Type: Exchange buy**2. Interests & Needs (Psychographic & Customer Priorities):**- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Competitive Product Consideration: MG Motors Hector- Explicit Needs & Preferences:  - Primary Vehicle Use: Family travel (multiple passengers)  - Typical Passengers: 4 to 5 (family)  - Key Features Desired: Safety features (Airbags, ABS, etc.), Comfort & space, Fuel efficiency / EV range  - Daily Driving Kilometers: 20 to 50 km per day (or 600 to 1,500 km per month)  - Profession/Work Style: Self-employed / Business owner",
     "ai_pitch": "Punjab Patil PATIL, XUV700 (BS6.2 AX7 P MT)**Key Highlights for You, Punjab:****Cutting-Edge Safety*** 5-Star BNCAP Safety* 6 Airbags protection* Advanced Driver Assistance Systems**Unmatched Comfort & Space*** 7-seater configuration* Dual-Zone Climate Control**Dynamic Performance*** 2.0L Turbocharged Petrol Engine* 200PS Power**Smart Convenience*** 10.25-inch touchscreen infotainment* Wireless Android Auto/CarPlay* Alexa built-in**Available Colors:** Everest White, Midnight Black, Valyrian Silver, Stealth Black, Deep Forest, Burnt SiennaXUV700 BS6.2 AX7 P MT Vs MG Motors Hector1. **Powertrain Performance**: The XUV700's 2.0L turbo petrol engine delivers a peak power of 197 bhp and 380 Nm of torque, significantly higher than the MG Hector's 1.5L turbo petrol engine, which produces 141 bhp and 250 Nm of torque.2. **Safety Rating**: The XUV700 holds a 5-star Global NCAP safety rating for adult occupant protection and a 4-star rating for child occupant protection. In contrast, the MG Hector has been rated 4 stars for adult occupant protection and 3 stars for child occupant protection in some reports, while other sources indicate it is yet to be officially rated by Global NCAP or Bharat NCAP.3. **Seating Capacity**: The XUV700 AX7 P MT variant offers a 7-seater configuration. The standard MG Hector is available with a 5-seater capacity.",
@@ -33,26 +31,41 @@ app = Flask(__name__)
 @app.route('/', methods=['POST'])
 def process_string():
     """
-    Handles incoming POST requests. It expects a JSON body containing a string input
-    and returns a fixed JSON response structure.
+    Handles incoming POST requests, validates the mandatory input fields,
+    and returns a fixed JSON response structure on success.
     """
+    # Define the fields that must be present in the incoming JSON
+    MANDATORY_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
+    
     try:
-        # Check if the request body is valid JSON
+        # Get the JSON data from the request body
         data = request.get_json()
+
+        # Check for empty or non-existent JSON body
+        if not data:
+            return jsonify({"error": "Request body must be valid JSON."}), 400
+
+        # Check for any missing mandatory fields. 
+        # Also checks if the field exists and its value is not None.
+        missing_fields = [field for field in MANDATORY_FIELDS if field not in data or data[field] is None]
+
+        # If there are missing fields, return a 400 Bad Request error
+        if missing_fields:
+            return jsonify({
+                "error": "Mandatory fields missing or empty.",
+                "missing_fields": missing_fields
+            }), 400
         
-        # In a real scenario, you would use the 'input_string' here:
-        # input_string = data.get('input_string') 
-        # For this example, we log and ignore it, as the output is fixed.
-        if data and 'input_string' in data:
-            print(f"Received input string: {data['input_string']}")
+        # Log the received data for debugging purposes
+        print(f"Received valid request data: {data}")
         
-        # Return the hardcoded JSON response
+        # All mandatory fields are present, return the successful response
         return jsonify(FIXED_RESPONSE_DATA), 200
 
     except Exception as e:
-        # Handle cases where the request is not valid JSON
-        print(f"Error processing request: {e}")
-        return jsonify({"error": "Invalid JSON or required 'input_string' key is missing."}), 400
+        # Catch exceptions during JSON parsing or general runtime errors (e.g., malformed JSON)
+        print(f"Unexpected error processing request: {e}")
+        return jsonify({"error": f"Internal Server Error or invalid request format."}), 500
 
 if __name__ == "__main__":
     # Cloud Run provides the PORT environment variable.
