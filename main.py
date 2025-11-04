@@ -1,47 +1,18 @@
 import os
 import json
-# New imports for AES decryption
 import base64
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# --- Security Note: These should be loaded securely, e.g., from environment variables ---
-# 16 bytes (128 bits) key for AES-128
-# IMPORTANT: Replace the placeholder keys below with your actual, secure keys loaded from environment variables.
-AES_KEY = os.environ.get('AES_KEY', 'a_secure_16byte_key').encode('utf-8')
-# 16 bytes (128 bits) IV for CBC
-AES_IV = os.environ.get('AES_IV', 'a_secure_16byte_iv_').encode('utf-8')
+# ==============================================================================
+# 1. FIXED DATA AND CONSTANTS
+# ==============================================================================
 
-# Ensure key/IV are correct length, otherwise log error and use placeholder for startup safety
-if len(AES_KEY) != 16 or len(AES_IV) != 16:
-    print("FATAL ERROR: AES_KEY or AES_IV length is incorrect (must be 16 bytes for AES-128). Defaulting to null key/IV.")
-    AES_KEY = b'\0' * 16 
-    AES_IV = b'\0' * 16 
-
-def decrypt_aes(encrypted_b64_str):
-    """Decrypts a base64 encoded string using AES-128 CBC and fixed IV."""
-    if not encrypted_b64_str:
-        return None
-        
-    try:
-        # The encrypted data is base64 decoded
-        encrypted_data = base64.b64decode(encrypted_b64_str)
-        
-        cipher = AES.new(AES_KEY, AES.MODE_CBC, AES_IV)
-        
-        # Decrypt and unpad the data
-        decrypted_padded = cipher.decrypt(encrypted_data)
-        decrypted_bytes = unpad(decrypted_padded, AES.block_size)
-        
-        # Decode to UTF-8 string
-        return decrypted_bytes.decode('utf-8')
-        
-    except (ValueError, TypeError, KeyError, base64.binascii.Error) as e:
-        # Catches incorrect padding, key errors, or base64 decode errors
-        print(f"Decryption failed for data: {encrypted_b64_str}. Error: {e}")
-        return None
+# Fields expected to be encrypted and are mandatory
+ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
+MANDATORY_FIELDS = ENCRYPTED_FIELDS 
 
 # The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
@@ -68,10 +39,45 @@ FIXED_RESPONSE_DATA = {
     }
 }
 
-app = Flask(__name__)
-CORS(app) # Initialize CORS with default settings (allows all origins)
 
-# Define the path to the configuration file (assuming it's in the same directory)
+# ==============================================================================
+# 2. SECURITY CONFIGURATION & UTILITY
+# ==============================================================================
+
+# --- Security Note: These should be loaded securely, e.g., from environment variables ---
+# 16 bytes (128 bits) key for AES-128
+# IMPORTANT: Replace the placeholder keys below with your actual, secure keys loaded from environment variables.
+AES_KEY = os.environ.get('AES_KEY', 'a_secure_16byte_key').encode('utf-8')
+# 16 bytes (128 bits) IV for CBC
+AES_IV = os.environ.get('AES_IV', 'a_secure_16byte_iv_').encode('utf-8')
+
+# Ensure key/IV are correct length, otherwise log error and use placeholder for startup safety
+if len(AES_KEY) != 16 or len(AES_IV) != 16:
+    print("FATAL ERROR: AES_KEY or AES_IV length is incorrect (must be 16 bytes for AES-128). Defaulting to null key/IV.")
+    AES_KEY = b'\0' * 16 
+    AES_IV = b'\0' * 16 
+
+def decrypt_aes(encrypted_b64_str):
+    """Decrypts a base64 encoded string using AES-128 CBC and fixed IV."""
+    if not encrypted_b64_str:
+        return None
+        
+    try:
+        encrypted_data = base64.b64decode(encrypted_b64_str)
+        cipher = AES.new(AES_KEY, AES.MODE_CBC, AES_IV)
+        decrypted_padded = cipher.decrypt(encrypted_data)
+        decrypted_bytes = unpad(decrypted_padded, AES.block_size)
+        return decrypted_bytes.decode('utf-8')
+        
+    except (ValueError, TypeError, KeyError, base64.binascii.Error) as e:
+        print(f"Decryption failed for data: {encrypted_b64_str}. Error: {e}")
+        return None
+
+
+# ==============================================================================
+# 3. SERVICE CONFIGURATION & UTILITY
+# ==============================================================================
+
 CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
 
 def load_config():
@@ -88,29 +94,57 @@ def load_config():
 
 CONFIG = load_config()
 
+def run_business_validation(decrypted_data, config):
+    """
+    Performs business logic validation (mileID, dealerCode, parentCode) 
+    against the loaded configuration.
+    
+    Returns: Tuple (bool is_valid, str failed_code)
+    """
+    mile_id = decrypted_data.get("mileID")
+    dealer_code = decrypted_data.get("dealerCode")
+    parent_code = decrypted_data.get("parentCode")
+    
+    # Check mileID
+    if mile_id not in config.get("allowed_mile_ids", []):
+        return False, f"mileID '{mile_id}'"
+    
+    # Check dealerCode
+    if dealer_code not in config.get("allowed_dealer_codes", []):
+        return False, f"dealerCode '{dealer_code}'"
+
+    # Check parentCode
+    if parent_code not in config.get("allowed_parent_codes", []):
+        return False, f"parentCode '{parent_code}'"
+        
+    return True, None
+
+
+# ==============================================================================
+# 4. FLASK APPLICATION AND ROUTE HANDLER
+# ==============================================================================
+
+app = Flask(__name__)
+CORS(app) # Initialize CORS with default settings (allows all origins)
+
 @app.route('/', methods=['POST'])
 def process_string():
     """
-    Handles incoming POST requests, decrypts mandatory fields, validates them
-    against the configuration, and returns the response.
+    Handles incoming POST requests, acting as the coordinating function 
+    for validation, decryption, and business logic processing.
     """
     
-    # Check if config was loaded successfully
+    # 1. Configuration Check
     if CONFIG is None:
         return jsonify({"error": "Service configuration unavailable."}), 500
         
-    # Fields expected to be encrypted
-    ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
-    # All 4 are mandatory
-    MANDATORY_FIELDS = ENCRYPTED_FIELDS 
-    
     try:
         data = request.get_json()
 
         if not data:
             return jsonify({"error": "Request body must be valid JSON."}), 400
 
-        # 1. Mandatory Fields Presence Check (pre-decryption)
+        # 2. Mandatory Fields Presence Check (pre-decryption)
         missing_fields = [field for field in MANDATORY_FIELDS if field not in data or data[field] is None]
 
         if missing_fields:
@@ -119,18 +153,17 @@ def process_string():
                 "missing_fields": missing_fields
             }), 400
             
-        # 2. Decryption and Validation (using a new dictionary for decrypted values)
+        # 3. Decryption
         decrypted_data = {}
         decryption_failed = False
         
         for field in ENCRYPTED_FIELDS:
-            encrypted_value = data.get(field)
-            decrypted_value = decrypt_aes(encrypted_value)
+            decrypted_value = decrypt_aes(data.get(field))
             
             if decrypted_value is None:
                 decryption_failed = True
                 print(f"Critical Decryption Failure for field: {field}")
-                break # Exit loop on first critical failure
+                break
             
             decrypted_data[field] = decrypted_value
             
@@ -138,45 +171,22 @@ def process_string():
              return jsonify({
                 "error": "Decryption Failed",
                 "message": "One or more input fields could not be decrypted. Check key, IV, padding, and base64 encoding."
-            }), 400 # Bad Request due to bad payload/encryption
+            }), 400
 
-        # 3. Code Validation Check against Configuration (using decrypted values)
-        
-        mile_id = decrypted_data.get("mileID")
-        dealer_code = decrypted_data.get("dealerCode")
-        parent_code = decrypted_data.get("parentCode")
-        
-        validation_failed = False
-        failed_code = None
-        
-        # Check mileID
-        if mile_id not in CONFIG.get("allowed_mile_ids", []):
-            validation_failed = True
-            failed_code = f"mileID '{mile_id}'"
-        
-        # Check dealerCode
-        elif dealer_code not in CONFIG.get("allowed_dealer_codes", []):
-            validation_failed = True
-            failed_code = f"dealerCode '{dealer_code}'"
-
-        # Check parentCode
-        elif parent_code not in CONFIG.get("allowed_parent_codes", []):
-            validation_failed = True
-            failed_code = f"parentCode '{parent_code}'"
+        # 4. Business Validation
+        is_valid, failed_code = run_business_validation(decrypted_data, CONFIG)
             
-        # If any validation failed, return the "Coming Soon" error
-        if validation_failed:
+        if not is_valid:
             return jsonify({
                 "error": "Coming Soon",
                 "message": f"Service for {failed_code} is not yet configured or available."
             }), 501 # Not Implemented
             
-        # All mandatory fields, decryption, and code validations passed
+        # 5. Success Response
         print(f"Received and Decrypted valid request data: {decrypted_data}")
         return jsonify(FIXED_RESPONSE_DATA), 200
 
     except Exception as e:
-        # Catch exceptions during JSON parsing or general runtime errors 
         print(f"Unexpected error processing request: {e}")
         return jsonify({"error": f"Internal Server Error: {e}"}), 500
 
