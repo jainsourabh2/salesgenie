@@ -18,12 +18,6 @@ from flask_cors import CORS
 ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
 MANDATORY_FIELDS = ENCRYPTED_FIELDS 
 
-# New constants for external API call
-# IMPORTANT: Configure these environment variables in your Cloud Run deployment!
-EXTERNAL_API_URL_NAME = os.environ.get('EXTERNAL_API_URL_NAME', 'api.default-tracking.com')
-EXTERNAL_APP_NAME = os.environ.get('EXTERNAL_APP_NAME', 'default_app')
-EXTERNAL_API_TIMEOUT = 5 # seconds for external call
-
 # The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
     "ai_summary": "Customer Sales Summary: Punjab Patil PATIL**1. Customer Persona Snapshot:**- Full Name: Punjab Patil PATIL- Gender: M- Location: Nanded, Maharashtra- Work Style: Self-employed / Business owner- Opportunity Stage: Enquiry- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Purchase Type: Exchange buy**2. Interests & Needs (Psychographic & Customer Priorities):**- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Competitive Product Consideration: MG Motors Hector- Explicit Needs & Preferences:  - Primary Vehicle Use: Family travel (multiple passengers)  - Typical Passengers: 4 to 5 (family)  - Key Features Desired: Safety features (Airbags, ABS, etc.), Comfort & space, Fuel efficiency / EV range  - Daily Driving Kilometers: 20 to 50 km per day (or 600 to 1,500 km per month)  - Profession/Work Style: Self-employed / Business owner",
@@ -51,21 +45,65 @@ FIXED_RESPONSE_DATA = {
 
 
 # ==============================================================================
-# 2. SECURITY CONFIGURATION & UTILITY
+# 2. SECURITY & ENVIRONMENT CONFIGURATION (Strict Validation)
 # ==============================================================================
 
-# --- Security Note: These should be loaded securely, e.g., from environment variables ---
-# 16 bytes (128 bits) key for AES-128
-# IMPORTANT: Replace the placeholder keys below with your actual, secure keys loaded from environment variables.
-AES_KEY = os.environ.get('AES_KEY', 'a_secure_16byte_key').encode('utf-8')
-# 16 bytes (128 bits) IV for CBC
-AES_IV = os.environ.get('AES_IV', 'a_secure_16byte_iv_').encode('utf-8')
+# Global flag to track environment setup validity
+IS_ENV_CONFIG_VALID = True
 
-# Ensure key/IV are correct length, otherwise log error and use placeholder for startup safety
-if len(AES_KEY) != 16 or len(AES_IV) != 16:
-    print("FATAL ERROR: AES_KEY or AES_IV length is incorrect (must be 16 bytes for AES-128). Defaulting to null key/IV.")
-    AES_KEY = b'\0' * 16 
-    AES_IV = b'\0' * 16 
+# Raw environment variables (no defaults allowed)
+EXTERNAL_API_URL_NAME = os.environ.get('EXTERNAL_API_URL_NAME')
+EXTERNAL_APP_NAME = os.environ.get('EXTERNAL_APP_NAME')
+EXTERNAL_API_TIMEOUT_RAW = os.environ.get('EXTERNAL_API_TIMEOUT')
+AES_KEY_RAW = os.environ.get('AES_KEY')
+AES_IV_RAW = os.environ.get('AES_IV')
+
+# Variables used by the application, initialized to None/zero
+AES_KEY = None
+AES_IV = None
+EXTERNAL_API_TIMEOUT = None
+
+# --- Validation Logic ---
+MISSING_ENVS = []
+
+# 1. Check for presence of all required variables
+if not EXTERNAL_API_URL_NAME: MISSING_ENVS.append('EXTERNAL_API_URL_NAME (Missing)')
+if not EXTERNAL_APP_NAME: MISSING_ENVS.append('EXTERNAL_APP_NAME (Missing)')
+if not AES_KEY_RAW: MISSING_ENVS.append('AES_KEY (Missing)')
+if not AES_IV_RAW: MISSING_ENVS.append('AES_IV (Missing)')
+if not EXTERNAL_API_TIMEOUT_RAW: MISSING_ENVS.append('EXTERNAL_API_TIMEOUT (Missing)')
+
+
+# 2. If present, check format/length
+# Check EXTERNAL_API_TIMEOUT format
+if EXTERNAL_API_TIMEOUT_RAW and not 'EXTERNAL_API_TIMEOUT (Missing)' in MISSING_ENVS:
+    try:
+        EXTERNAL_API_TIMEOUT = int(EXTERNAL_API_TIMEOUT_RAW)
+    except ValueError:
+        MISSING_ENVS.append('EXTERNAL_API_TIMEOUT (Invalid: Must be an integer)')
+
+# Check AES_KEY length (16 bytes)
+if AES_KEY_RAW and not 'AES_KEY (Missing)' in MISSING_ENVS:
+    if len(AES_KEY_RAW.encode('utf-8')) != 16:
+        MISSING_ENVS.append('AES_KEY (Invalid: Must be 16 bytes/128 bits)')
+
+# Check AES_IV length (16 bytes)
+if AES_IV_RAW and not 'AES_IV (Missing)' in MISSING_ENVS:
+    if len(AES_IV_RAW.encode('utf-8')) != 16:
+        MISSING_ENVS.append('AES_IV (Invalid: Must be 16 bytes/128 bits)')
+
+
+# 3. Finalize global state
+if MISSING_ENVS:
+    print(f"FATAL ERROR at startup: The following critical environment configuration issues were found: {'; '.join(MISSING_ENVS)}")
+    IS_ENV_CONFIG_VALID = False
+else:
+    # Set final global variables now that they are validated
+    AES_KEY = AES_KEY_RAW.encode('utf-8')
+    AES_IV = AES_IV_RAW.encode('utf-8')
+    # EXTERNAL_API_TIMEOUT was already converted if valid, otherwise it was validated as missing/invalid
+    
+# --- End of Validation Logic ---
 
 def decrypt_aes(encrypted_b64_str):
     """Decrypts a base64 encoded string using AES-128 CBC and fixed IV."""
@@ -73,6 +111,10 @@ def decrypt_aes(encrypted_b64_str):
         return None
         
     try:
+        if AES_KEY is None or AES_IV is None: 
+            # This check is defensive; the route handler should catch IS_ENV_CONFIG_VALID=False first.
+            return None 
+
         encrypted_data = base64.b64decode(encrypted_b64_str)
         cipher = AES.new(AES_KEY, AES.MODE_CBC, AES_IV)
         decrypted_padded = cipher.decrypt(encrypted_data)
@@ -144,9 +186,20 @@ def process_string():
     for validation, decryption, and business logic processing.
     """
     
-    # 1. Configuration Check
+    # 0. Environment Configuration Check
+    if not IS_ENV_CONFIG_VALID:
+        error_message = (
+            "The application failed to start due to missing or invalid environment configuration. "
+            f"Please check and correct the following variables: {'; '.join(MISSING_ENVS)}"
+        )
+        return jsonify({
+            "error": "Configuration Error",
+            "message": error_message
+        }), 500
+        
+    # 1. Configuration Check (config.json)
     if CONFIG is None:
-        return jsonify({"error": "Service configuration unavailable."}), 500
+        return jsonify({"error": "Service configuration unavailable (config.json loading failed)."}), 500
         
     try:
         data = request.get_json()
@@ -192,7 +245,7 @@ def process_string():
                 "message": f"Service for {failed_code} is not yet configured or available."
             }), 501 # Not Implemented
             
-        # 5. External API Call (Updated Step)
+        # 5. External API Call
         mobile_number = decrypted_data.get("mobileNumber")
         
         # Session UUID is concatenation of mobile_number and a new UUID
@@ -225,6 +278,7 @@ def process_string():
         return jsonify(FIXED_RESPONSE_DATA), 200
 
     except Exception as e:
+        # Catch all unexpected runtime errors
         print(f"Unexpected error processing request: {e}")
         return jsonify({"error": f"Internal Server Error: {e}"}), 500
 
