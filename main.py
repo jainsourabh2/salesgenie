@@ -1,5 +1,6 @@
 import os
 from flask import Flask, request, jsonify
+from flask_cors import CORS # Import CORS extension
 
 # The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
@@ -27,6 +28,7 @@ FIXED_RESPONSE_DATA = {
 }
 
 app = Flask(__name__)
+CORS(app) # Initialize CORS with default settings (allows all origins)
 
 @app.route('/', methods=['POST'])
 def process_string():
