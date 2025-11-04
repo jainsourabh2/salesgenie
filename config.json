@@ -1,0 +1,17 @@
+{
+    "allowed_mile_ids": [
+        "mileID_123",
+        "mileID_456",
+        "mileID"
+    ],
+    "allowed_dealer_codes": [
+        "DCODE_A",
+        "DCODE_B",
+        "DCODE"
+    ],
+    "allowed_parent_codes": [
+        "PCODE_X",
+        "PCODE_Y",
+        "PCODE"
+    ]
+}
