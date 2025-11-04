@@ -1,6 +1,7 @@
 import os
+import json # New import for JSON configuration
 from flask import Flask, request, jsonify
-from flask_cors import CORS # Import CORS extension
+from flask_cors import CORS
 
 # The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
@@ -30,38 +31,84 @@ FIXED_RESPONSE_DATA = {
 app = Flask(__name__)
 CORS(app) # Initialize CORS with default settings (allows all origins)
 
+# Define the path to the configuration file (assuming it's in the same directory)
+CONFIG_FILE_PATH = os.path.join(os.path.dirname(__file__), 'config.json')
+
+def load_config():
+    """Load configuration from config.json."""
+    try:
+        with open(CONFIG_FILE_PATH, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Configuration file not found at {CONFIG_FILE_PATH}")
+        return None
+    except json.JSONDecodeError:
+        print("Error: Could not decode config.json.")
+        return None
+
+CONFIG = load_config()
+
 @app.route('/', methods=['POST'])
 def process_string():
     """
-    Handles incoming POST requests, validates the mandatory input fields,
-    and returns a fixed JSON response structure on success.
+    Handles incoming POST requests, validates mandatory input fields and 
+    codes against the configuration, and returns the response.
     """
-    # Define the fields that must be present in the incoming JSON
+    
+    # Check if config was loaded successfully
+    if CONFIG is None:
+        return jsonify({"error": "Service configuration unavailable."}), 500
+        
     MANDATORY_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
     
     try:
-        # Get the JSON data from the request body
         data = request.get_json()
 
-        # Check for empty or non-existent JSON body
         if not data:
             return jsonify({"error": "Request body must be valid JSON."}), 400
 
-        # Check for any missing mandatory fields. 
-        # Also checks if the field exists and its value is not None.
+        # 1. Mandatory Fields Check
         missing_fields = [field for field in MANDATORY_FIELDS if field not in data or data[field] is None]
 
-        # If there are missing fields, return a 400 Bad Request error
         if missing_fields:
             return jsonify({
                 "error": "Mandatory fields missing or empty.",
                 "missing_fields": missing_fields
             }), 400
+            
+        # 2. Code Validation Check against Configuration
         
-        # Log the received data for debugging purposes
+        mile_id = data.get("mileID")
+        dealer_code = data.get("dealerCode")
+        parent_code = data.get("parentCode")
+        
+        validation_failed = False
+        failed_code = None
+        
+        # Check mileID
+        if mile_id not in CONFIG.get("allowed_mile_ids", []):
+            validation_failed = True
+            failed_code = f"mileID '{mile_id}'"
+        
+        # Check dealerCode
+        elif dealer_code not in CONFIG.get("allowed_dealer_codes", []):
+            validation_failed = True
+            failed_code = f"dealerCode '{dealer_code}'"
+
+        # Check parentCode
+        elif parent_code not in CONFIG.get("allowed_parent_codes", []):
+            validation_failed = True
+            failed_code = f"parentCode '{parent_code}'"
+            
+        # If any validation failed, return the "Coming Soon" error
+        if validation_failed:
+            return jsonify({
+                "error": "Coming Soon",
+                "message": f"Service for {failed_code} is not yet configured or available."
+            }), 501 # Not Implemented
+            
+        # All mandatory fields and code validations passed
         print(f"Received valid request data: {data}")
-        
-        # All mandatory fields are present, return the successful response
         return jsonify(FIXED_RESPONSE_DATA), 200
 
     except Exception as e:
@@ -70,8 +117,5 @@ def process_string():
         return jsonify({"error": f"Internal Server Error or invalid request format."}), 500
 
 if __name__ == "__main__":
-    # Cloud Run provides the PORT environment variable.
-    # Use 8080 as a default for local testing if the PORT variable is not set.
     port = int(os.environ.get('PORT', 8080))
-    # Setting host='0.0.0.0' is necessary for deployment on Cloud Run.
     app.run(host='0.0.0.0', port=port)
