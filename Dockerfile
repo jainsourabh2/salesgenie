@@ -11,6 +11,7 @@ WORKDIR $APP_HOME
 
 # Copy the requirements file into the container at $APP_HOME
 COPY requirements.txt .
+COPY config.json .
 
 # Install Python dependencies, including Flask and Gunicorn
 RUN pip install --no-cache-dir -r requirements.txt
