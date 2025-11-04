@@ -1,6 +1,10 @@
 import os
 import json
 import base64
+# New import for external API call
+import requests
+# New import for session ID generation
+import uuid 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 from flask import Flask, request, jsonify
@@ -13,6 +17,12 @@ from flask_cors import CORS
 # Fields expected to be encrypted and are mandatory
 ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
 MANDATORY_FIELDS = ENCRYPTED_FIELDS 
+
+# New constants for external API call
+# IMPORTANT: Configure these environment variables in your Cloud Run deployment!
+EXTERNAL_API_URL_NAME = os.environ.get('EXTERNAL_API_URL_NAME', 'api.default-tracking.com')
+EXTERNAL_APP_NAME = os.environ.get('EXTERNAL_APP_NAME', 'default_app')
+EXTERNAL_API_TIMEOUT = 5 # seconds for external call
 
 # The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
@@ -182,7 +192,35 @@ def process_string():
                 "message": f"Service for {failed_code} is not yet configured or available."
             }), 501 # Not Implemented
             
-        # 5. Success Response
+        # 5. External API Call (Updated Step)
+        mobile_number = decrypted_data.get("mobileNumber")
+        
+        # Session UUID is concatenation of mobile_number and a new UUID
+        session_uuid = f"{mobile_number}_{uuid.uuid4()}"
+        
+        # Construct the session creation URL using configured environment variables
+        session_url = (
+            f"https://{EXTERNAL_API_URL_NAME}/apps/{EXTERNAL_APP_NAME}/users/"
+            f"{mobile_number}/sessions/{session_uuid}"
+        )
+        
+        try:
+            # POST request without any JSON body (as requested)
+            response = requests.post(
+                session_url, 
+                timeout=EXTERNAL_API_TIMEOUT,
+                # Set a common content type header even without a body
+                headers={'Content-Type': 'application/json'}
+            )
+            # Raise an exception for bad status codes (4xx or 5xx)
+            response.raise_for_status() 
+            print(f"Successfully called external session API. Status: {response.status_code}")
+        except requests.exceptions.RequestException as req_e:
+            # Log the failure but continue to return the main response
+            print(f"WARNING: Failed to call external session API: {session_url}. Error: {req_e}")
+
+
+        # 6. Success Response
         print(f"Received and Decrypted valid request data: {decrypted_data}")
         return jsonify(FIXED_RESPONSE_DATA), 200
 
