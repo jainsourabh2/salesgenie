@@ -179,10 +179,10 @@ def run_business_validation(decrypted_data, config):
 app = Flask(__name__)
 CORS(app) # Initialize CORS with default settings (allows all origins)
 
-@app.route('/', methods=['GET'])
+@app.route('/healthz', methods=['GET'])
 def health_check():
     """Simple health check endpoint for Cloud Run/Kubernetes."""
-    # Health check moved to root path (GET /) for better Cloud Run compatibility.
+    # Health check moved to /healthz as requested.
     return jsonify({"status": "ok", "message": "Service is running"}), 200
 
 @app.route('/process', methods=['POST'])
