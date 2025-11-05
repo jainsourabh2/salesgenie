@@ -245,32 +245,60 @@ def process_string():
                 "message": f"Service for {failed_code} is not yet configured or available."
             }), 501 # Not Implemented
             
-        # 5. External API Call
+        # 5. External API Calls
         mobile_number = decrypted_data.get("mobileNumber")
         
         # Session UUID is concatenation of mobile_number and a new UUID
         session_uuid = f"{mobile_number}_{uuid.uuid4()}"
         
-        # Construct the session creation URL using configured environment variables
+        # --- First Call: Session Tracking ---
         session_url = (
             f"https://{EXTERNAL_API_URL_NAME}/apps/{EXTERNAL_APP_NAME}/users/"
             f"{mobile_number}/sessions/{session_uuid}"
         )
         
+        session_creation_status = False
         try:
             # POST request without any JSON body (as requested)
-            response = requests.post(
+            response_1 = requests.post(
                 session_url, 
                 timeout=EXTERNAL_API_TIMEOUT,
-                # Set a common content type header even without a body
                 headers={'Content-Type': 'application/json'}
             )
             # Raise an exception for bad status codes (4xx or 5xx)
-            response.raise_for_status() 
-            print(f"Successfully called external session API. Status: {response.status_code}")
+            response_1.raise_for_status() 
+            print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
+            session_creation_status = True
         except requests.exceptions.RequestException as req_e:
             # Log the failure but continue to return the main response
-            print(f"WARNING: Failed to call external session API: {session_url}. Error: {req_e}")
+            print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
+
+        
+        # --- Second Call: Run SSE (Conditional on First Call Success) ---
+        if session_creation_status:
+            sse_url = f"https://{EXTERNAL_API_URL_NAME}/run_sse"
+            sse_payload = {
+                "app_name": EXTERNAL_APP_NAME,
+                "user_id": mobile_number,
+                "session_id": session_uuid,
+                "new_message": {
+                    "role": "user",
+                    "parts": [{"text": mobile_number}]
+                },
+                "streaming": False
+            }
+            
+            try:
+                response_2 = requests.post(
+                    sse_url, 
+                    json=sse_payload, 
+                    timeout=EXTERNAL_API_TIMEOUT,
+                    headers={'Content-Type': 'application/json'}
+                )
+                response_2.raise_for_status()
+                print(f"Successfully called external run_sse API. Status: {response_2.status_code}")
+            except requests.exceptions.RequestException as req_e_2:
+                print(f"WARNING: Failed to call external run_sse API: {sse_url}. Error: {req_e_2}")
 
 
         # 6. Success Response
