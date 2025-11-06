@@ -182,7 +182,7 @@ CORS(app) # Initialize CORS with default settings (allows all origins)
 @app.route('/', methods=['GET'])
 def health_check():
     """Simple health check endpoint for Cloud Run/Kubernetes."""
-    # Health check moved back to root path (GET /) for better Cloud Run compatibility.
+    # Health check at root path (GET /) for Cloud Run compatibility.
     return jsonify({"status": "ok", "message": "Service is running"}), 200
 
 @app.route('/process', methods=['POST'])
@@ -257,43 +257,36 @@ def process_string():
         # Session UUID is concatenation of mobile_number and a new UUID
         session_uuid = f"{mobile_number}_{uuid.uuid4()}"
         
-        # --- First Call: Session Tracking ---
-        session_url = (
-            f"https://{EXTERNAL_API_URL_NAME}/apps/{EXTERNAL_APP_NAME}/users/"
-            f"{mobile_number}/sessions/{session_uuid}"
-        )
+        # NOTE: session_creation_status is set to True below for debugging,
+        # skipping the actual session tracking API call.
+        session_creation_status = True 
+
+        # # --- First Call: Session Tracking (CURRENTLY COMMENTED OUT FOR DEBUGGING) ---
+        # session_url = (
+        #     f"https://{EXTERNAL_API_URL_NAME}/apps/{EXTERNAL_APP_NAME}/users/"
+        #     f"{mobile_number}/sessions/{session_uuid}"
+        # )
         
-        session_creation_status = True
-        #try:
-        #    # POST request without any JSON body (as requested)
-        #    response_1 = requests.post(
-        #        session_url, 
-        #        timeout=EXTERNAL_API_TIMEOUT,
-        #        headers={'Content-Type': 'application/json'}
-        #    )
-        #    # Raise an exception for bad status codes (4xx or 5xx)
-        #    response_1.raise_for_status() 
-        #    print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
-        #    session_creation_status = True
-        #except requests.exceptions.RequestException as req_e:
-        #    # Log the failure but continue to return the main response
-        #    print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
+        # try:
+        #     # POST request without any JSON body (as requested)
+        #     response_1 = requests.post(
+        #         session_url, 
+        #         timeout=EXTERNAL_API_TIMEOUT,
+        #         headers={'Content-Type': 'application/json'}
+        #     )
+        #     # Raise an exception for bad status codes (4xx or 5xx)
+        #     response_1.raise_for_status() 
+        #     print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
+        #     session_creation_status = True
+        # except requests.exceptions.RequestException as req_e:
+        #     # Log the failure but continue to return the main response
+        #     print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
 
         
-        # --- Second Call: Run SSE (Conditional on First Call Success) ---
+        # --- Second Call: Process Inquiry (Conditional on First Call Success) ---
         if session_creation_status:
             sse_url = f"https://{EXTERNAL_API_URL_NAME}/api/process-inquiry"
-            # sse_payload = {
-            #     "app_name": EXTERNAL_APP_NAME,
-            #     "user_id": mobile_number,
-            #     "session_id": session_uuid,
-            #     "new_message": {
-            #         "role": "user",
-            #         "parts": [{"text": mobile_number}]
-            #     },
-            #     "streaming": False
-            # }
-
+            # Use the simple mobile number payload you defined
             sse_payload = {
                 "mobilephone" : mobile_number
             }
@@ -306,10 +299,21 @@ def process_string():
                     headers={'Content-Type': 'application/json'}
                 )
                 response_2.raise_for_status()
-                print(f"Successfully called external run_sse API. Status: {response_2.status_code}")
-                print(response_2)
+                print(f"Successfully called external API: {sse_url}. Status: {response_2.status_code}")
+                
+                # --- NEW: Print JSON Response Content ---
+                try:
+                    # Attempt to parse as JSON and print it neatly
+                    response_json = response_2.json()
+                    print("External API JSON Response:")
+                    print(json.dumps(response_json, indent=4))
+                except json.JSONDecodeError:
+                    # If it's not JSON, print the raw text content
+                    print(f"External API Raw Text Response: {response_2.text}")
+                # --- END NEW ---
+
             except requests.exceptions.RequestException as req_e_2:
-                print(f"WARNING: Failed to call external run_sse API: {sse_url}. Error: {req_e_2}")
+                print(f"WARNING: Failed to call external API: {sse_url}. Error: {req_e_2}")
 
 
         # 6. Success Response
