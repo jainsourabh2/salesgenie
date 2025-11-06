@@ -18,7 +18,7 @@ from flask_cors import CORS
 ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
 MANDATORY_FIELDS = ENCRYPTED_FIELDS 
 
-# The fixed JSON response.
+# The fixed JSON response requested by the user.
 FIXED_RESPONSE_DATA = {
     "ai_summary": "Customer Sales Summary: Punjab Patil PATIL**1. Customer Persona Snapshot:**- Full Name: Punjab Patil PATIL- Gender: M- Location: Nanded, Maharashtra- Work Style: Self-employed / Business owner- Opportunity Stage: Enquiry- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Purchase Type: Exchange buy**2. Interests & Needs (Psychographic & Customer Priorities):**- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Competitive Product Consideration: MG Motors Hector- Explicit Needs & Preferences:  - Primary Vehicle Use: Family travel (multiple passengers)  - Typical Passengers: 4 to 5 (family)  - Key Features Desired: Safety features (Airbags, ABS, etc.), Comfort & space, Fuel efficiency / EV range  - Daily Driving Kilometers: 20 to 50 km per day (or 600 to 1,500 km per month)  - Profession/Work Style: Self-employed / Business owner",
     "ai_pitch": "Punjab Patil PATIL, XUV700 (BS6.2 AX7 P MT)**Key Highlights for You, Punjab:****Cutting-Edge Safety*** 5-Star BNCAP Safety* 6 Airbags protection* Advanced Driver Assistance Systems**Unmatched Comfort & Space*** 7-seater configuration* Dual-Zone Climate Control**Dynamic Performance*** 2.0L Turbocharged Petrol Engine* 200PS Power**Smart Convenience*** 10.25-inch touchscreen infotainment* Wireless Android Auto/CarPlay* Alexa built-in**Available Colors:** Everest White, Midnight Black, Valyrian Silver, Stealth Black, Deep Forest, Burnt SiennaXUV700 BS6.2 AX7 P MT Vs MG Motors Hector1. **Powertrain Performance**: The XUV700's 2.0L turbo petrol engine delivers a peak power of 197 bhp and 380 Nm of torque, significantly higher than the MG Hector's 1.5L turbo petrol engine, which produces 141 bhp and 250 Nm of torque.2. **Safety Rating**: The XUV700 holds a 5-star Global NCAP safety rating for adult occupant protection and a 4-star rating for child occupant protection. In contrast, the MG Hector has been rated 4 stars for adult occupant protection and 3 stars for child occupant protection in some reports, while other sources indicate it is yet to be officially rated by Global NCAP or Bharat NCAP.3. **Seating Capacity**: The XUV700 AX7 P MT variant offers a 7-seater configuration. The standard MG Hector is available with a 5-seater capacity.",
@@ -263,35 +263,39 @@ def process_string():
             f"{mobile_number}/sessions/{session_uuid}"
         )
         
-        session_creation_status = False
-        try:
-            # POST request without any JSON body (as requested)
-            response_1 = requests.post(
-                session_url, 
-                timeout=EXTERNAL_API_TIMEOUT,
-                headers={'Content-Type': 'application/json'}
-            )
-            # Raise an exception for bad status codes (4xx or 5xx)
-            response_1.raise_for_status() 
-            print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
-            session_creation_status = True
-        except requests.exceptions.RequestException as req_e:
-            # Log the failure but continue to return the main response
-            print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
+        session_creation_status = True
+        #try:
+        #    # POST request without any JSON body (as requested)
+        #    response_1 = requests.post(
+        #        session_url, 
+        #        timeout=EXTERNAL_API_TIMEOUT,
+        #        headers={'Content-Type': 'application/json'}
+        #    )
+        #    # Raise an exception for bad status codes (4xx or 5xx)
+        #    response_1.raise_for_status() 
+        #    print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
+        #    session_creation_status = True
+        #except requests.exceptions.RequestException as req_e:
+        #    # Log the failure but continue to return the main response
+        #    print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
 
         
         # --- Second Call: Run SSE (Conditional on First Call Success) ---
         if session_creation_status:
-            sse_url = f"https://{EXTERNAL_API_URL_NAME}/run_sse"
+            sse_url = f"https://{EXTERNAL_API_URL_NAME}/api/process-inquiry"
+            # sse_payload = {
+            #     "app_name": EXTERNAL_APP_NAME,
+            #     "user_id": mobile_number,
+            #     "session_id": session_uuid,
+            #     "new_message": {
+            #         "role": "user",
+            #         "parts": [{"text": mobile_number}]
+            #     },
+            #     "streaming": False
+            # }
+
             sse_payload = {
-                "app_name": EXTERNAL_APP_NAME,
-                "user_id": mobile_number,
-                "session_id": session_uuid,
-                "new_message": {
-                    "role": "user",
-                    "parts": [{"text": mobile_number}]
-                },
-                "streaming": False
+                "mobilephone" : mobile_number
             }
             
             try:
@@ -303,6 +307,7 @@ def process_string():
                 )
                 response_2.raise_for_status()
                 print(f"Successfully called external run_sse API. Status: {response_2.status_code}")
+                print(response_2)
             except requests.exceptions.RequestException as req_e_2:
                 print(f"WARNING: Failed to call external run_sse API: {sse_url}. Error: {req_e_2}")
 
