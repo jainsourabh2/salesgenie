@@ -18,7 +18,7 @@ from flask_cors import CORS
 ENCRYPTED_FIELDS = ["mileID", "mobileNumber", "dealerCode", "parentCode"]
 MANDATORY_FIELDS = ENCRYPTED_FIELDS 
 
-# The fixed JSON response requested by the user.
+# The fixed JSON response requested by the user. (Used as a FALLBACK if API fails)
 FIXED_RESPONSE_DATA = {
     "ai_summary": "Customer Sales Summary: Punjab Patil PATIL**1. Customer Persona Snapshot:**- Full Name: Punjab Patil PATIL- Gender: M- Location: Nanded, Maharashtra- Work Style: Self-employed / Business owner- Opportunity Stage: Enquiry- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Purchase Type: Exchange buy**2. Interests & Needs (Psychographic & Customer Priorities):**- Primary Product Interest: XUV700 (BS6.2 AX7 P MT)- Competitive Product Consideration: MG Motors Hector- Explicit Needs & Preferences:  - Primary Vehicle Use: Family travel (multiple passengers)  - Typical Passengers: 4 to 5 (family)  - Key Features Desired: Safety features (Airbags, ABS, etc.), Comfort & space, Fuel efficiency / EV range  - Daily Driving Kilometers: 20 to 50 km per day (or 600 to 1,500 km per month)  - Profession/Work Style: Self-employed / Business owner",
     "ai_pitch": "Punjab Patil PATIL, XUV700 (BS6.2 AX7 P MT)**Key Highlights for You, Punjab:****Cutting-Edge Safety*** 5-Star BNCAP Safety* 6 Airbags protection* Advanced Driver Assistance Systems**Unmatched Comfort & Space*** 7-seater configuration* Dual-Zone Climate Control**Dynamic Performance*** 2.0L Turbocharged Petrol Engine* 200PS Power**Smart Convenience*** 10.25-inch touchscreen infotainment* Wireless Android Auto/CarPlay* Alexa built-in**Available Colors:** Everest White, Midnight Black, Valyrian Silver, Stealth Black, Deep Forest, Burnt SiennaXUV700 BS6.2 AX7 P MT Vs MG Motors Hector1. **Powertrain Performance**: The XUV700's 2.0L turbo petrol engine delivers a peak power of 197 bhp and 380 Nm of torque, significantly higher than the MG Hector's 1.5L turbo petrol engine, which produces 141 bhp and 250 Nm of torque.2. **Safety Rating**: The XUV700 holds a 5-star Global NCAP safety rating for adult occupant protection and a 4-star rating for child occupant protection. In contrast, the MG Hector has been rated 4 stars for adult occupant protection and 3 stars for child occupant protection in some reports, while other sources indicate it is yet to be officially rated by Global NCAP or Bharat NCAP.3. **Seating Capacity**: The XUV700 AX7 P MT variant offers a 7-seater configuration. The standard MG Hector is available with a 5-seater capacity.",
@@ -283,6 +283,9 @@ def process_string():
         #     print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
 
         
+        # Initialize the final response data with the fixed content as a fallback
+        final_response_data = FIXED_RESPONSE_DATA
+
         # --- Second Call: Process Inquiry (Conditional on First Call Success) ---
         if session_creation_status:
             sse_url = f"https://{EXTERNAL_API_URL_NAME}/api/process-inquiry"
@@ -301,24 +304,24 @@ def process_string():
                 response_2.raise_for_status()
                 print(f"Successfully called external API: {sse_url}. Status: {response_2.status_code}")
                 
-                # --- NEW: Print JSON Response Content ---
+                # Update the final response data to be the actual response from the external API
                 try:
-                    # Attempt to parse as JSON and print it neatly
                     response_json = response_2.json()
+                    final_response_data = response_json
                     print("External API JSON Response:")
                     print(json.dumps(response_json, indent=4))
                 except json.JSONDecodeError:
-                    # If it's not JSON, print the raw text content
-                    print(f"External API Raw Text Response: {response_2.text}")
-                # --- END NEW ---
+                    # If it's not JSON, print the raw text content and use fallback
+                    print(f"WARNING: External API returned non-JSON data. Using fallback response. Raw Text: {response_2.text}")
+                
 
             except requests.exceptions.RequestException as req_e_2:
-                print(f"WARNING: Failed to call external API: {sse_url}. Error: {req_e_2}")
+                print(f"WARNING: Failed to call external API: {sse_url}. Using fallback response. Error: {req_e_2}")
 
 
         # 6. Success Response
         print(f"Received and Decrypted valid request data: {decrypted_data}")
-        return jsonify(FIXED_RESPONSE_DATA), 200
+        return jsonify(final_response_data), 200
 
     except Exception as e:
         # Catch all unexpected runtime errors
