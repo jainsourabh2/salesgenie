@@ -1,10 +1,7 @@
-# Latest Code
 import os
 import json
 import base64
-# New import for external API call
 import requests
-# New import for session ID generation
 import uuid 
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
@@ -51,6 +48,7 @@ FIXED_RESPONSE_DATA = {
 
 # Global flag to track environment setup validity
 IS_ENV_CONFIG_VALID = True
+IS_DEBUG_LOGGING_ENABLED = os.environ.get('ENABLE_DEBUG_LOGGING', 'False').lower() in ('true', '1')
 
 # Raw environment variables (no defaults allowed)
 EXTERNAL_API_URL_NAME = os.environ.get('EXTERNAL_API_URL_NAME')
@@ -68,41 +66,42 @@ EXTERNAL_API_TIMEOUT = None
 MISSING_ENVS = []
 
 # 1. Check for presence of all required variables
-if not EXTERNAL_API_URL_NAME: MISSING_ENVS.append('EXTERNAL_API_URL_NAME (Missing)')
-if not EXTERNAL_APP_NAME: MISSING_ENVS.append('EXTERNAL_APP_NAME (Missing)')
-if not AES_KEY_RAW: MISSING_ENVS.append('AES_KEY (Missing)')
-if not AES_IV_RAW: MISSING_ENVS.append('AES_IV (Missing)')
-if not EXTERNAL_API_TIMEOUT_RAW: MISSING_ENVS.append('EXTERNAL_API_TIMEOUT (Missing)')
+if not EXTERNAL_API_URL_NAME: MISSING_ENVS.append('EXTERNAL_API_URL_NAME (Missing or configured blank)')
+if not EXTERNAL_APP_NAME: MISSING_ENVS.append('EXTERNAL_APP_NAME (Missing or configured blank)')
+if not AES_KEY_RAW: MISSING_ENVS.append('AES_KEY (Missing or configured blank)')
+if not AES_IV_RAW: MISSING_ENVS.append('AES_IV (Missing or configured blank)')
+if not EXTERNAL_API_TIMEOUT_RAW: MISSING_ENVS.append('EXTERNAL_API_TIMEOUT (Missing or configured blank)')
 
 
 # 2. If present, check format/length
 # Check EXTERNAL_API_TIMEOUT format
-if EXTERNAL_API_TIMEOUT_RAW and not 'EXTERNAL_API_TIMEOUT (Missing)' in MISSING_ENVS:
+if EXTERNAL_API_TIMEOUT_RAW and not 'EXTERNAL_API_TIMEOUT (Missing or configured blank)' in MISSING_ENVS:
     try:
         EXTERNAL_API_TIMEOUT = int(EXTERNAL_API_TIMEOUT_RAW)
     except ValueError:
         MISSING_ENVS.append('EXTERNAL_API_TIMEOUT (Invalid: Must be an integer)')
 
 # Check AES_KEY length (16 bytes)
-if AES_KEY_RAW and not 'AES_KEY (Missing)' in MISSING_ENVS:
+if AES_KEY_RAW and not 'AES_KEY (Missing or configured blank)' in MISSING_ENVS:
+    # Key length must be 16 for AES-128
     if len(AES_KEY_RAW.encode('utf-8')) != 16:
-        MISSING_ENVS.append('AES_KEY (Invalid: Must be 16 bytes/128 bits)')
+        MISSING_ENVS.append(f'AES_KEY (Invalid: Must be 16 bytes/128 bits, found {len(AES_KEY_RAW.encode("utf-8"))})')
+    else:
+        AES_KEY = AES_KEY_RAW.encode('utf-8')
 
 # Check AES_IV length (16 bytes)
-if AES_IV_RAW and not 'AES_IV (Missing)' in MISSING_ENVS:
+if AES_IV_RAW and not 'AES_IV (Missing or configured blank)' in MISSING_ENVS:
+    # IV length must be 16 for AES-128 CBC
     if len(AES_IV_RAW.encode('utf-8')) != 16:
-        MISSING_ENVS.append('AES_IV (Invalid: Must be 16 bytes/128 bits)')
+        MISSING_ENVS.append(f'AES_IV (Invalid: Must be 16 bytes/128 bits, found {len(AES_IV_RAW.encode("utf-8"))})')
+    else:
+        AES_IV = AES_IV_RAW.encode('utf-8')
 
 
 # 3. Finalize global state
 if MISSING_ENVS:
     print(f"FATAL ERROR at startup: The following critical environment configuration issues were found: {'; '.join(MISSING_ENVS)}")
     IS_ENV_CONFIG_VALID = False
-else:
-    # Set final global variables now that they are validated
-    AES_KEY = AES_KEY_RAW.encode('utf-8')
-    AES_IV = AES_IV_RAW.encode('utf-8')
-    # EXTERNAL_API_TIMEOUT was already converted if valid, otherwise it was validated as missing/invalid
     
 # --- End of Validation Logic ---
 
@@ -113,7 +112,6 @@ def decrypt_aes(encrypted_b64_str):
         
     try:
         if AES_KEY is None or AES_IV is None: 
-            # This check is defensive; the route handler should catch IS_ENV_CONFIG_VALID=False first.
             return None 
 
         encrypted_data = base64.b64decode(encrypted_b64_str)
@@ -123,7 +121,8 @@ def decrypt_aes(encrypted_b64_str):
         return decrypted_bytes.decode('utf-8')
         
     except (ValueError, TypeError, KeyError, base64.binascii.Error) as e:
-        print(f"Decryption failed for data: {encrypted_b64_str}. Error: {e}")
+        if IS_DEBUG_LOGGING_ENABLED:
+            print(f"DEBUG: Decryption failed for data: {encrypted_b64_str}. Error: {e}")
         return None
 
 
@@ -199,6 +198,7 @@ def process_string():
             "The application failed to start due to missing or invalid environment configuration. "
             f"Please check and correct the following variables: {'; '.join(MISSING_ENVS)}"
         )
+        print(f"Returning 500: {error_message}")
         return jsonify({
             "error": "Configuration Error",
             "message": error_message
@@ -206,6 +206,7 @@ def process_string():
         
     # 1. Configuration Check (config.json)
     if CONFIG is None:
+        print("Returning 500: Service configuration unavailable (config.json loading failed).")
         return jsonify({"error": "Service configuration unavailable (config.json loading failed)."}), 500
         
     try:
@@ -242,11 +243,15 @@ def process_string():
                 "error": "Decryption Failed",
                 "message": "One or more input fields could not be decrypted. Check key, IV, padding, and base64 encoding."
             }), 400
+        
+        if IS_DEBUG_LOGGING_ENABLED:
+            print(f"DEBUG: Successfully decrypted data: {decrypted_data}")
 
         # 4. Business Validation
         is_valid, failed_code = run_business_validation(decrypted_data, CONFIG)
             
         if not is_valid:
+            print(f"Returning 501: Service for {failed_code} is not configured.")
             return jsonify({
                 "error": "Coming Soon",
                 "message": f"Service for {failed_code} is not yet configured or available."
@@ -258,29 +263,24 @@ def process_string():
         # Session UUID is concatenation of mobile_number and a new UUID
         session_uuid = f"{mobile_number}_{uuid.uuid4()}"
         
-        # NOTE: session_creation_status is set to True below for debugging,
-        # skipping the actual session tracking API call.
-        session_creation_status = True 
+        # --- First Call: Session Tracking (Currently COMMENTED OUT for Debugging) ---
+        session_creation_status = True # Manually set to True for debugging
 
-        # # --- First Call: Session Tracking (CURRENTLY COMMENTED OUT FOR DEBUGGING) ---
         # session_url = (
         #     f"https://{EXTERNAL_API_URL_NAME}/apps/{EXTERNAL_APP_NAME}/users/"
         #     f"{mobile_number}/sessions/{session_uuid}"
         # )
         
         # try:
-        #     # POST request without any JSON body (as requested)
         #     response_1 = requests.post(
         #         session_url, 
         #         timeout=EXTERNAL_API_TIMEOUT,
         #         headers={'Content-Type': 'application/json'}
         #     )
-        #     # Raise an exception for bad status codes (4xx or 5xx)
         #     response_1.raise_for_status() 
         #     print(f"Successfully called external session tracking API. Status: {response_1.status_code}")
         #     session_creation_status = True
         # except requests.exceptions.RequestException as req_e:
-        #     # Log the failure but continue to return the main response
         #     print(f"WARNING: Failed to call external session tracking API: {session_url}. Error: {req_e}")
 
         
@@ -296,32 +296,47 @@ def process_string():
             }
             
             try:
+                # Synchronous call that respects the timeout
                 response_2 = requests.post(
                     sse_url, 
                     json=sse_payload, 
                     timeout=EXTERNAL_API_TIMEOUT,
                     headers={'Content-Type': 'application/json'}
                 )
-                response_2.raise_for_status()
-                print(f"Successfully called external API: {sse_url}. Status: {response_2.status_code}")
+                response_2.raise_for_status() # Check for HTTP status errors (4xx, 5xx)
+                
+                if IS_DEBUG_LOGGING_ENABLED:
+                    print(f"DEBUG: Successfully called external API: {sse_url}. Status: {response_2.status_code}")
                 
                 # Update the final response data to be the actual response from the external API
                 try:
                     response_json = response_2.json()
                     final_response_data = response_json
-                    print("External API JSON Response:")
+                    
+                    print("External API JSON Response (returned to client):")
                     print(json.dumps(response_json, indent=4))
+                    
                 except json.JSONDecodeError:
                     # If it's not JSON, print the raw text content and use fallback
                     print(f"WARNING: External API returned non-JSON data. Using fallback response. Raw Text: {response_2.text}")
                 
 
             except requests.exceptions.RequestException as req_e_2:
-                print(f"WARNING: Failed to call external API: {sse_url}. Using fallback response. Error: {req_e_2}")
+                # --- Specific Logging for Diagnostic Aid ---
+                if isinstance(req_e_2, requests.exceptions.Timeout):
+                    error_detail = f"Timeout Error: Request exceeded {EXTERNAL_API_TIMEOUT} seconds."
+                elif isinstance(req_e_2, requests.exceptions.HTTPError):
+                    # Check if response object exists before accessing status code
+                    status_code = req_e_2.response.status_code if req_e_2.response is not None else 'Unknown'
+                    error_detail = f"HTTP Error: Status Code {status_code}. Did the external API return an error? Response Text: {req_e_2.response.text if req_e_2.response else 'N/A'}"
+                else:
+                    error_detail = f"Connection/Other Error: {req_e_2}. Is the URL correct and accessible?"
+
+                print(f"WARNING: External API call to {sse_url} failed. {error_detail}. Using fallback response.")
+                # --- End of Specific Logging ---
 
 
         # 6. Success Response
-        print(f"Received and Decrypted valid request data: {decrypted_data}")
         return jsonify(final_response_data), 200
 
     except Exception as e:
