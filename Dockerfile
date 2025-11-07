@@ -28,4 +28,4 @@ EXPOSE 8080
 # - 'main:app' references the 'app' variable in 'main.py'
 # - '--bind 0.0.0.0:$PORT' makes it listen on the port provided by Cloud Run
 # - '--workers 2' is a good starting point for concurrency
-CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 2 main:app
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 main:app
