@@ -11,10 +11,12 @@ WORKDIR $APP_HOME
 
 # Copy the requirements file into the container at $APP_HOME
 COPY requirements.txt .
-COPY config.json .
 
 # Install Python dependencies, including Flask and Gunicorn
 RUN pip install --no-cache-dir -r requirements.txt
+
+# New step: Copy the configuration file
+COPY config.json .
 
 # Copy the application source code into the container
 COPY main.py .
@@ -28,4 +30,5 @@ EXPOSE 8080
 # - 'main:app' references the 'app' variable in 'main.py'
 # - '--bind 0.0.0.0:$PORT' makes it listen on the port provided by Cloud Run
 # - '--workers 2' is a good starting point for concurrency
-CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 main:app
+# Added --timeout 300 to set the worker timeout to 300 seconds (5 minutes)
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 300 main:app
