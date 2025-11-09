@@ -31,4 +31,4 @@ EXPOSE 8080
 # - '--bind 0.0.0.0:$PORT' makes it listen on the port provided by Cloud Run
 # - '--workers 2' is a good starting point for concurrency
 # Added --timeout 300 to set the worker timeout to 300 seconds (5 minutes)
-CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 2 --timeout 300 main:app
+CMD exec gunicorn --bind 0.0.0.0:$PORT --workers 1 --timeout 300 --log-level debug main:app
