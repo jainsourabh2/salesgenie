@@ -302,6 +302,8 @@ DROP TABLE IF EXISTS
   <<PROJECT_ID>>.<<DATASET_ID>>.customer_final;
 
 CREATE TABLE <<PROJECT_ID>>.<<DATASET_ID>>.customer_final
+CLUSTER BY
+(mobilephone)  
 AS 
 SELECT c.* EXCEPT(contact_id, opportunity_id, enquiry_number)
 FROM `<<MDP_PROJECT_ID>>.<<MDP_DATASET_ID>>.contact_lead_opp_td_task_comp_book_enquiry_survey_td_survey` AS c
